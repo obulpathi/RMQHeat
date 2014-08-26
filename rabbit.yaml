@@ -1,0 +1,98 @@
+heat_template_version: 2013-05-23
+
+description: Template to deploy a single RabbitMQ instance
+
+parameters:
+    server_flavor:
+        description: Flavor for Cloud Servers
+        type: string
+        default: 2 GB Performance
+
+    server_hostname:
+        description: Hostname for the server.
+        type: string
+        default: rmq
+
+    ssh_keypair_name:
+        description: Nova keypair name for ssh access to the server
+        type: string
+        default: jgbes
+
+    ssh_private_key:
+        description: private key to access the created servers
+        type: string
+
+    rmq_admin_user:
+        description: username for the rabbitmq account
+        type: string
+        default: admin
+
+    rmq_admin_pass:
+        description: password for the rabbitmq account
+        type: string
+        default: password
+
+    rmq_master_host:
+        description: hostname of master node
+        type: string
+
+    rmq_master_ip:
+        description: ip of the master node
+        type: string
+
+
+resources:
+    rabbit-node:
+        type: Rackspace::Cloud::Server
+        properties:
+            flavor: { get_param: server_flavor}
+            image: Ubuntu 14.04 LTS (Trusty Tahr) (PVHVM)
+            key_name: { get_param: ssh_keypair_name }
+            user_data:
+                str_replace:
+                    template: |
+                        touch ~/.ssh/idrsa
+                        chmod 400 ~/.ssh/idrsa
+                        touch ~/.ssh/config
+                        echo -e "sshkey" >> ~/.ssh/idrsa
+                        echo "IdentityFile ~/.ssh/idrsa" >> ~/.ssh/config
+                        echo "deb http://www.rabbitmq.com/debian/ testing main" >> /etc/apt/sources.list
+                        wget http://www.rabbitmq.com/rabbitmq-signing-key-public.asc
+                        apt-key add rabbitmq-signing-key-public.asc
+                        apt-get update
+                        apt-get upgrade -y
+                        apt-get install -y rabbitmq-server sshpass
+                        rabbitmqctl add_user rmquser rmqpassword
+                        rabbitmqctl set_user_tags rmquser administrator
+                        rabbitmqctl stop
+                        rabbitmq-plugins enable rabbitmq_management
+                        iptables -I INPUT 1 -i eth0 -p tcp --dport 15672 -j ACCEPT
+                        iptables-save
+                        echo "masterip masterhost" >> /etc/hosts
+                        scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no masterhost:/var/lib/rabbitmq/.erlang.cookie /var/lib/rabbitmq/.erlang.cookie
+                        service rabbitmq-server start
+
+                #echo $(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | sed -n 2p) $(hostname) | ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no masterhost 'cat >> /etc/hosts'
+                # rabbitmqctl stop_app
+                # rabbitmqctl join_cluster rabbit@masterhost
+                # rabbitmqctl start_app
+
+
+                    params:
+                        sshkey: { get_param: ssh_private_key }
+                        rmquser: { get_param: rmq_admin_user}
+                        rmqpassword: { get_param: rmq_admin_pass}
+                        masterhost: {get_param: rmq_master_host}
+                        masterip: {get_param: rmq_master_ip}
+
+
+
+outputs:
+    rmq-server-ip:
+        value: { get_attr: [rabbit-node, accessIPv4]}
+    rmq-private-ip:
+        value: { get_attr: [rabbit-node, privateIPv4]}
+    rmq-root-pass:
+        value: { get_attr: [rabbit-node, admin_pass ]}
+    show:
+        value: {get_attr: [rabbit-node, show]}
